@@ -34,5 +34,5 @@ export const CWV_THRESHOLDS = {
 
 // Crawl settings
 export const DEFAULT_CRAWL_DEPTH = 10;
-export const MAX_CRAWL_DEPTH = 100;
+export const MAX_CRAWL_DEPTH = 1500;
 export const LINKS_PER_BATCH = 50;

@@ -103,5 +103,5 @@ async function discoverFromSitemap(origin) {
   } catch {
     // Sitemap not available
   }
-  return links.slice(0, 500); // Cap at 500
+  return links.slice(0, 1500); // Cap at 1500
 }

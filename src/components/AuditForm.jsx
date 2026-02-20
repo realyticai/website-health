@@ -1,7 +1,7 @@
 import { Globe, Search } from 'lucide-react';
 import { DEFAULT_CRAWL_DEPTH, MAX_CRAWL_DEPTH } from '../config';
 
-const PRESETS = [1, 5, 10, 25, 50, 100];
+const PRESETS = [1, 10, 50, 100, 500, 1000];
 
 export default function AuditForm({ url, onUrlChange, depth, onDepthChange, onStart }) {
   const handleSubmit = (e) => {
