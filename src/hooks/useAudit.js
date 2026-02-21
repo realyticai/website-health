@@ -64,8 +64,33 @@ export default function useAudit() {
 
       setSiteName(discovery.siteName || new URL(normalizedUrl).hostname);
 
-      // Cap pages at requested depth, ensure target URL is first
-      const allPages = discovery.pages || [normalizedUrl];
+      let allPages = discovery.pages || [normalizedUrl];
+
+      // Recursive discovery: if we haven't found enough pages and depth is higher,
+      // follow links on discovered pages to find deeper pages
+      if (allPages.length < depth && allPages.length > 1 && !cancelledRef.current) {
+        setProgress({ current: 0, total: 0, currentUrl: '', phase: `Found ${allPages.length} pages, discovering more...` });
+
+        // Pick up to 10 pages to crawl for more links (skip the first — already crawled)
+        const pagesToFollow = allPages.slice(1, 11);
+        try {
+          const deepRes = await fetch('/.netlify/functions/discover', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ url: normalizedUrl, followUrls: pagesToFollow }),
+          });
+          const deepDiscovery = await deepRes.json();
+          if (deepDiscovery.pages?.length) {
+            const combined = new Set(allPages);
+            for (const p of deepDiscovery.pages) combined.add(p);
+            allPages = [...combined].sort();
+          }
+        } catch {
+          // Deep discovery failed, continue with what we have
+        }
+      }
+
+      // Cap pages at requested depth
       const pagesToAudit = allPages.slice(0, depth);
       setPages(pagesToAudit);
 
