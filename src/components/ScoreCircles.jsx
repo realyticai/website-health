@@ -16,34 +16,29 @@ export default function ScoreCircles({ scores, categorizedIssues, activeCategory
       // Use actual PageSpeed scores when available
       displayScores[key] = scores[key];
     } else if (categorizedIssues) {
-      // Fallback: score by % of check types that PASSED
-      // This matches how PageSpeed works — it counts audits, not instances
+      // Fallback: use Lighthouse-style weighted scoring from CATEGORY_CHECKS
       const checks = CATEGORY_CHECKS[key] || [];
-      if (checks.length === 0) {
-        // No custom checks for this category (e.g., Best Practices) — show 100
-        displayScores[key] = 100;
+      const totalWeight = checks.reduce((sum, c) => sum + c.weight, 0);
+
+      if (totalWeight === 0) {
+        // No weighted checks (e.g., Performance is API-only, Best Practices has none)
+        // Show null so the gauge displays '–' instead of a misleading number
+        displayScores[key] = null;
       } else {
         const issues = categorizedIssues[key] || [];
         const failedTypes = new Set(issues.map((i) => i.type));
 
-        // Weight: critical/high failures count more than medium/low
-        let totalWeight = 0;
         let passedWeight = 0;
         for (const check of checks) {
-          const severity = issues.find((i) => i.type === check.type)?.severity;
-          const weight = severity === 'critical' ? 3 : severity === 'high' ? 2 : 1;
-          totalWeight += weight;
           if (!failedTypes.has(check.type)) {
-            passedWeight += weight;
+            passedWeight += check.weight;
           }
         }
 
-        displayScores[key] = totalWeight > 0
-          ? Math.round((passedWeight / totalWeight) * 100)
-          : 100;
+        displayScores[key] = Math.round((passedWeight / totalWeight) * 100);
       }
     } else {
-      displayScores[key] = 0;
+      displayScores[key] = null;
     }
   }
 
