@@ -237,6 +237,7 @@ export default function App() {
 
           <ScoreCircles
             scores={selectedSite.scores}
+            categorizedIssues={categorizedIssues}
             activeCategory={activeCategory}
             onCategoryClick={handleCategoryClick}
           />
