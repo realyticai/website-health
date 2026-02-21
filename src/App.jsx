@@ -1,7 +1,7 @@
 import { useState, useMemo, useCallback, useEffect, useRef } from 'react';
 import useAudit from './hooks/useAudit';
 import useSites from './hooks/useSites';
-import { ISSUE_TO_CATEGORY } from './config';
+import { ISSUE_TO_CATEGORY, CATEGORY_CHECKS } from './config';
 import { exportIssuesCSV } from './utils/export';
 import TopBar from './components/TopBar';
 import AuditForm from './components/AuditForm';
@@ -63,11 +63,37 @@ export default function App() {
   // When audit completes, save results to site store
   useEffect(() => {
     if (auditState === 'complete' && prevAuditStateRef.current !== 'complete') {
+      // Pre-compute scores for all 4 categories
+      const apiScores = pagespeedResults?.scores || {};
+      const allIssues = auditResults.flatMap((r) =>
+        (r.issues || []).map((issue) => ({ ...issue, pageUrl: r.url }))
+      );
+      const computedScores = {};
+      for (const key of ['performance', 'accessibility', 'bestPractices', 'seo']) {
+        if (apiScores[key] != null) {
+          computedScores[key] = apiScores[key];
+        } else {
+          const checks = CATEGORY_CHECKS[key] || [];
+          const totalWeight = checks.reduce((sum, c) => sum + c.weight, 0);
+          if (totalWeight === 0) {
+            computedScores[key] = null;
+          } else {
+            const catIssues = allIssues.filter((i) => ISSUE_TO_CATEGORY[i.type] === key);
+            const failedTypes = new Set(catIssues.map((i) => i.type));
+            let passedWeight = 0;
+            for (const check of checks) {
+              if (!failedTypes.has(check.type)) passedWeight += check.weight;
+            }
+            computedScores[key] = Math.round((passedWeight / totalWeight) * 100);
+          }
+        }
+      }
+
       const siteData = {
         url: targetUrl,
         name: siteName,
         crawlDepth,
-        scores: pagespeedResults?.scores || null,
+        scores: computedScores,
         auditResults,
         linkResults,
         pagespeedResults,

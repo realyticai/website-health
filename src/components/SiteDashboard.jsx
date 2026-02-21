@@ -44,7 +44,7 @@ export default function SiteDashboard({ sites, onSelectSite, onAddSite, onRemove
 
 function SiteCard({ site, onSelect, onRemove, onRerun }) {
   const scores = site.scores || {};
-  const hasScores = scores.performance != null;
+  const hasScores = Object.values(scores).some((v) => v != null);
   const lastAudit = site.lastAudit
     ? new Date(site.lastAudit).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
     : 'Never';
