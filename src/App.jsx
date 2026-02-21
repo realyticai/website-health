@@ -74,17 +74,15 @@ export default function App() {
           computedScores[key] = apiScores[key];
         } else {
           const checks = CATEGORY_CHECKS[key] || [];
-          const totalWeight = checks.reduce((sum, c) => sum + c.weight, 0);
-          if (totalWeight === 0) {
-            computedScores[key] = null;
+          if (checks.length === 0) {
+            // No checks defined (e.g., Best Practices) — default to 100
+            computedScores[key] = 100;
           } else {
+            // Score by % of check types that passed (equal weight fallback)
             const catIssues = allIssues.filter((i) => ISSUE_TO_CATEGORY[i.type] === key);
             const failedTypes = new Set(catIssues.map((i) => i.type));
-            let passedWeight = 0;
-            for (const check of checks) {
-              if (!failedTypes.has(check.type)) passedWeight += check.weight;
-            }
-            computedScores[key] = Math.round((passedWeight / totalWeight) * 100);
+            const passed = checks.filter((c) => !failedTypes.has(c.type)).length;
+            computedScores[key] = Math.round((passed / checks.length) * 100);
           }
         }
       }
