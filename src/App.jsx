@@ -1,16 +1,17 @@
+import { useState, useMemo, useCallback, useEffect, useRef } from 'react';
 import useAudit from './hooks/useAudit';
+import useSites from './hooks/useSites';
+import { ISSUE_TO_CATEGORY } from './config';
+import { exportIssuesCSV } from './utils/export';
 import TopBar from './components/TopBar';
 import AuditForm from './components/AuditForm';
 import ProgressBar from './components/ProgressBar';
-import HealthScore from './components/HealthScore';
-import KPICards from './components/KPICards';
-import CoreWebVitals from './components/CoreWebVitals';
-import IssueSummary from './components/IssueSummary';
-import IssuesTable from './components/IssuesTable';
-import BrokenLinksTable from './components/BrokenLinksTable';
-import PageList from './components/PageList';
-import OpportunitiesCard from './components/OpportunitiesCard';
+import SiteDashboard from './components/SiteDashboard';
+import ScoreCircles from './components/ScoreCircles';
+import CategoryDrilldown from './components/CategoryDrilldown';
 import ExportBar from './components/ExportBar';
+import IssueSummary from './components/IssueSummary';
+import PageList from './components/PageList';
 import Toast from './components/Toast';
 import Footer from './components/Footer';
 import './App.css';
@@ -31,66 +32,189 @@ export default function App() {
     startTime,
     activeSeverityFilter,
     setActiveSeverityFilter,
-
-    filteredIssues,
     issueCounts,
-    brokenLinks,
-    redirectLinks,
-    healthScore,
-    totalStats,
-
     startAudit,
     cancelAudit,
     resetAudit,
-    exportCSV,
-
     toastMessage,
     toastVisible,
     hideToast,
   } = useAudit();
 
+  const {
+    sites,
+    selectedSite,
+    viewMode,
+    setViewMode,
+    addSite,
+    updateSite,
+    removeSite,
+    selectSite,
+    goToDashboard,
+  } = useSites();
+
+  const [showAddForm, setShowAddForm] = useState(false);
+  const rerunSiteIdRef = useRef(null);
+  const [activeCategory, setActiveCategory] = useState(null);
+  const prevAuditStateRef = useRef(auditState);
+
   const isRunning = ['discovering', 'auditing', 'checking-links', 'pagespeed'].includes(auditState);
+
+  // When audit completes, save results to site store
+  useEffect(() => {
+    if (auditState === 'complete' && prevAuditStateRef.current !== 'complete') {
+      const siteData = {
+        url: targetUrl,
+        name: siteName,
+        crawlDepth,
+        scores: pagespeedResults?.scores || null,
+        auditResults,
+        linkResults,
+        pagespeedResults,
+      };
+
+      if (rerunSiteIdRef.current) {
+        updateSite(rerunSiteIdRef.current, siteData);
+        selectSite(rerunSiteIdRef.current);
+        rerunSiteIdRef.current = null;
+      } else {
+        addSite(siteData);
+      }
+      setShowAddForm(false);
+    }
+    prevAuditStateRef.current = auditState;
+  }, [auditState, targetUrl, siteName, crawlDepth, pagespeedResults, auditResults, linkResults, updateSite, addSite, selectSite]);
+
+  // Get data for the currently selected site
+  const siteData = useMemo(() => {
+    if (!selectedSite?.auditData) return null;
+    return selectedSite.auditData;
+  }, [selectedSite]);
+
+  // Categorize issues into the 4 PageSpeed categories
+  const categorizedIssues = useMemo(() => {
+    if (!siteData) return { performance: [], accessibility: [], bestPractices: [], seo: [] };
+
+    const allIssues = (siteData.auditResults || []).flatMap((r) =>
+      (r.issues || []).map((issue) => ({ ...issue, pageUrl: r.url }))
+    );
+
+    const buckets = { performance: [], accessibility: [], bestPractices: [], seo: [] };
+    for (const issue of allIssues) {
+      const cat = ISSUE_TO_CATEGORY[issue.type] || 'seo';
+      if (buckets[cat]) buckets[cat].push(issue);
+    }
+    return buckets;
+  }, [siteData]);
+
+  const siteBrokenLinks = useMemo(() => {
+    if (!siteData?.linkResults) return [];
+    return siteData.linkResults.filter((l) => !l.ok && !l.error?.includes('timeout') && l.status !== 301 && l.status !== 302);
+  }, [siteData]);
+
+  const siteRedirectLinks = useMemo(() => {
+    if (!siteData?.linkResults) return [];
+    return siteData.linkResults.filter((l) => l.status === 301 || l.status === 302 || l.redirect);
+  }, [siteData]);
+
+  const handleAddSite = () => {
+    setShowAddForm(true);
+    rerunSiteIdRef.current = null;
+    resetAudit();
+    setViewMode('auditing');
+  };
+
+  const handleRerunSite = (id) => {
+    const site = sites.find((s) => s.id === id);
+    if (!site) return;
+    rerunSiteIdRef.current = id;
+    setShowAddForm(true);
+    resetAudit();
+    setViewMode('auditing');
+    setTimeout(() => startAudit(site.url, site.crawlDepth || 10), 100);
+  };
+
+  const handleRerunFromSiteView = () => {
+    if (!selectedSite) return;
+    handleRerunSite(selectedSite.id);
+  };
+
+  const handleBack = () => {
+    if (isRunning) cancelAudit();
+    setShowAddForm(false);
+    rerunSiteIdRef.current = null;
+    setActiveCategory(null);
+    goToDashboard();
+  };
+
+  const handleCategoryClick = (cat) => {
+    setActiveCategory(activeCategory === cat ? null : cat);
+  };
+
+  const handleExportCSV = useCallback(() => {
+    if (!siteData) return;
+    exportIssuesCSV(siteData.auditResults || [], siteData.linkResults || [], selectedSite?.name || '');
+  }, [siteData, selectedSite]);
+
+  const currentViewMode = showAddForm ? 'auditing' : viewMode;
 
   return (
     <div className="app">
-      <TopBar />
+      <TopBar
+        viewMode={currentViewMode === 'dashboard' ? 'dashboard' : 'site'}
+        siteName={currentViewMode === 'site' ? selectedSite?.name : null}
+        onBack={handleBack}
+      />
 
-      {/* IDLE — Show audit form */}
-      {auditState === 'idle' && (
+      {/* DASHBOARD — Show all sites */}
+      {currentViewMode === 'dashboard' && (
         <main className="dashboard">
-          <AuditForm
-            url={targetUrl}
-            onUrlChange={setTargetUrl}
-            depth={crawlDepth}
-            onDepthChange={setCrawlDepth}
-            onStart={startAudit}
+          <SiteDashboard
+            sites={sites}
+            onSelectSite={selectSite}
+            onAddSite={handleAddSite}
+            onRemoveSite={removeSite}
+            onRerunSite={handleRerunSite}
           />
         </main>
       )}
 
-      {/* ERROR — Show error + retry */}
-      {auditState === 'error' && (
+      {/* AUDITING — Audit form / progress */}
+      {currentViewMode === 'auditing' && (
         <main className="dashboard">
-          <div className="audit-form-wrapper">
-            <div className="audit-form" style={{ textAlign: 'center' }}>
-              <h2 style={{ color: 'var(--red)', marginBottom: 12 }}>Audit Failed</h2>
-              <p style={{ color: 'var(--gray-500)', marginBottom: 24 }}>{error}</p>
-              <button className="btn btn-primary" onClick={resetAudit}>Try Again</button>
+          {auditState === 'idle' && (
+            <AuditForm
+              url={targetUrl}
+              onUrlChange={setTargetUrl}
+              depth={crawlDepth}
+              onDepthChange={setCrawlDepth}
+              onStart={startAudit}
+            />
+          )}
+
+          {auditState === 'error' && (
+            <div className="audit-form-wrapper">
+              <div className="audit-form" style={{ textAlign: 'center' }}>
+                <h2 style={{ color: 'var(--red)', marginBottom: 12 }}>Audit Failed</h2>
+                <p style={{ color: 'var(--gray-500)', marginBottom: 24 }}>{error}</p>
+                <div style={{ display: 'flex', gap: 12, justifyContent: 'center' }}>
+                  <button className="btn btn-ghost" onClick={handleBack}>Back to Dashboard</button>
+                  <button className="btn btn-primary" onClick={resetAudit}>Try Again</button>
+                </div>
+              </div>
             </div>
-          </div>
-        </main>
-      )}
+          )}
 
-      {/* RUNNING — Show progress + live results */}
-      {isRunning && (
-        <main className="dashboard">
-          <ProgressBar
-            progress={progress}
-            state={auditState}
-            onCancel={cancelAudit}
-            startTime={startTime}
-          />
-          {auditResults.length > 0 && issueCounts.all > 0 && (
+          {isRunning && (
+            <ProgressBar
+              progress={progress}
+              state={auditState}
+              onCancel={handleBack}
+              startTime={startTime}
+            />
+          )}
+
+          {isRunning && auditResults.length > 0 && issueCounts.all > 0 && (
             <IssueSummary
               counts={issueCounts}
               activeFilter={activeSeverityFilter}
@@ -100,42 +224,38 @@ export default function App() {
         </main>
       )}
 
-      {/* COMPLETE — Full results dashboard */}
-      {auditState === 'complete' && (
+      {/* SITE VIEW — Full PageSpeed-style report */}
+      {currentViewMode === 'site' && selectedSite && (
         <main className="dashboard">
           <ExportBar
-            url={targetUrl}
-            siteName={siteName}
-            onExportCSV={exportCSV}
-            onNewAudit={resetAudit}
+            siteName={selectedSite.name}
+            url={selectedSite.url}
+            lastAudit={selectedSite.lastAudit}
+            onExportCSV={handleExportCSV}
+            onRerun={handleRerunFromSiteView}
           />
 
-          <HealthScore
-            score={healthScore}
-            issueCounts={issueCounts}
-            totalStats={totalStats}
+          <ScoreCircles
+            scores={selectedSite.scores}
+            activeCategory={activeCategory}
+            onCategoryClick={handleCategoryClick}
           />
 
-          <KPICards scores={pagespeedResults?.scores} />
+          {['performance', 'accessibility', 'bestPractices', 'seo'].map((cat) => (
+            <CategoryDrilldown
+              key={cat}
+              category={cat}
+              score={selectedSite.scores?.[cat]}
+              issues={categorizedIssues[cat]}
+              pagespeedResults={siteData?.pagespeedResults}
+              brokenLinks={siteBrokenLinks}
+              redirectLinks={siteRedirectLinks}
+              auditResults={siteData?.auditResults}
+              defaultOpen={activeCategory === cat}
+            />
+          ))}
 
-          <CoreWebVitals vitals={pagespeedResults?.coreWebVitals} />
-
-          <IssueSummary
-            counts={issueCounts}
-            activeFilter={activeSeverityFilter}
-            onFilterChange={setActiveSeverityFilter}
-          />
-
-          <IssuesTable issues={filteredIssues} />
-
-          <BrokenLinksTable
-            brokenLinks={brokenLinks}
-            redirectLinks={redirectLinks}
-          />
-
-          <OpportunitiesCard opportunities={pagespeedResults?.opportunities} />
-
-          <PageList auditResults={auditResults} />
+          <PageList auditResults={siteData?.auditResults || []} />
         </main>
       )}
 
